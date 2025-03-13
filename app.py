@@ -5,7 +5,6 @@ import os
 import cv2
 import numpy as np
 import io
-import json
 import torch
 from PIL import Image
 from werkzeug.utils import secure_filename
@@ -34,7 +33,7 @@ face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_fronta
 # Load FaceNet model
 embedder = InceptionResnetV1(pretrained="vggface2").eval()
 
-def extract_embeddings(image_bytes):
+def extract_embedding(image_bytes):
     np_arr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
@@ -44,21 +43,21 @@ def extract_embeddings(image_bytes):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
-    embeddings_list = []
-    
-    for (x, y, w, h) in faces:
-        face = img[y:y+h, x:x+w]
-        face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-        face_pil = Image.fromarray(face_rgb)
-        face_tensor = torch.tensor(np.array(face_pil)).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+    if len(faces) == 0:
+        return None, None  # No faces detected
 
-        with torch.no_grad():
-            embedding = embedder(face_tensor).numpy().tolist()
-        
-        embeddings_list.append(embedding)
+    # Process the first detected face
+    x, y, w, h = faces[0]
+    face = img[y:y+h, x:x+w]
+    face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+    face_pil = Image.fromarray(face_rgb)
+    face_tensor = torch.tensor(np.array(face_pil)).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+
+    with torch.no_grad():
+        embedding = embedder(face_tensor).numpy().flatten().tolist()  # Convert to list
 
     _, buffer = cv2.imencode(".jpg", img)
-    return buffer.tobytes(), embeddings_list
+    return buffer.tobytes(), embedding
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -70,18 +69,20 @@ def upload():
             return jsonify({"error": "Missing name or image"}), 400
 
         image_bytes = image_file.read()
-        processed_image_data, embeddings = extract_embeddings(image_bytes)
+        processed_image_data, embedding = extract_embedding(image_bytes)
+
+        if embedding is None:
+            return jsonify({"error": "No face detected"}), 400
 
         cursor.execute(
-            "INSERT INTO missing_persons (name, image, faces) VALUES (%s, %s, %s) RETURNING id",
-            (name, psycopg2.Binary(processed_image_data), json.dumps(embeddings)),
+            "INSERT INTO missing_persons (name, image, embedding) VALUES (%s, %s, %s) RETURNING id",
+            (name, psycopg2.Binary(processed_image_data), embedding),
         )
         conn.commit()
         image_id = cursor.fetchone()[0]
 
         return jsonify({
             "message": "File uploaded and processed successfully",
-            "faces_detected": len(embeddings),
             "image_id": image_id
         }), 200
 
