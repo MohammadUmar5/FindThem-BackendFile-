@@ -23,7 +23,19 @@ source .venv/bin/activate  # Activate on macOS/Linux
 pip install -r requirements.txt
 ```
 
-## Step 4: Set Up Environment Variables
+## Step 4: Database Setup
+1. Open PostgreSQL and connect to your database.
+2. Run the following SQL query to create the `missing_persons` table:
+
+```sql
+CREATE TABLE missing_persons (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    embedding VECTOR(512) NOT NULL
+);
+```
+
+## Step 5: Set Up Environment Variables
 Create a `.env` file in the project root and add the following:
 ```
 DB_NAME=your_database_name
@@ -33,20 +45,20 @@ DB_HOST=your_database_host
 DB_PORT=your_database_port
 ```
 
-## Step 5: Run the Backend Server
+## Step 6: Run the Backend Server
 ```sh
 python app.py
 ```
 By default, the server runs on `http://127.0.0.1:5001`.
 
-## Step 6: Test the API
+## Step 7: Test the API
 ### Upload an Image for Face Matching
 ```sh
 curl -X POST http://127.0.0.1:5001/match -F "image=@/path/to/image.jpg"
 ```
 If a match is found, you’ll get a response with the person's details.
 
-## Step 7: Stop the Server
+## Step 8: Stop the Server
 Press `Ctrl + C` in the terminal.
 
 ---
