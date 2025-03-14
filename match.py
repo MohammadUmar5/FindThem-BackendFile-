@@ -1,15 +1,12 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import psycopg2
 import os
 import cv2
 import numpy as np
-import io
 import torch
 from PIL import Image
-from werkzeug.utils import secure_filename
 from facenet_pytorch import InceptionResnetV1
-
 
 # Load environment variables
 load_dotenv()
@@ -45,7 +42,7 @@ def extract_embedding(image_bytes):
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
     if len(faces) == 0:
-        return None, None  # No faces detected
+        return None  # No faces detected
 
     # Process the first detected face
     x, y, w, h = faces[0]
@@ -55,54 +52,43 @@ def extract_embedding(image_bytes):
     face_tensor = torch.tensor(np.array(face_pil)).float().permute(2, 0, 1).unsqueeze(0) / 255.0
 
     with torch.no_grad():
-        embedding = embedder(face_tensor).numpy().flatten().tolist()  # Convert to list
+        embedding = embedder(face_tensor).numpy().flatten().tolist()
 
-    _, buffer = cv2.imencode(".jpg", img)
-    return buffer.tobytes(), embedding
+    return embedding
 
-@app.route("/upload", methods=["POST"])
-def upload():
+@app.route("/match", methods=["POST"])
+def match():
     try:
-        name = request.form.get("name")
         image_file = request.files.get("image")
-
-        if not name or not image_file:
-            return jsonify({"error": "Missing name or image"}), 400
+        if not image_file:
+            return jsonify({"error": "Missing image"}), 400
 
         image_bytes = image_file.read()
-        processed_image_data, embedding = extract_embedding(image_bytes)
+        embedding = extract_embedding(image_bytes)
+        print(type(embedding))  # Should be <class 'numpy.ndarray'>
+        print(embedding[:5])  # Print first few values for debugging
+
 
         if embedding is None:
             return jsonify({"error": "No face detected"}), 400
 
-        cursor.execute(
-            "INSERT INTO missing_persons (name, image, embedding) VALUES (%s, %s, %s::vector) RETURNING id",
-            (name, psycopg2.Binary(processed_image_data), embedding),
-        )
-        conn.commit()
-        image_id = cursor.fetchone()[0]
+        # Query database for stored embeddings
+        cursor.execute("SELECT id, name FROM missing_persons ORDER BY embedding <-> %s::vector LIMIT 1;", (embedding,))
+        match = cursor.fetchone()
 
-        return jsonify({
-            "message": "File uploaded and processed successfully",
-            "image_id": image_id
-        }), 200
+        if match:
+            return jsonify({
+                "match_found": True,
+                "matched_person": {
+                    "id": match[0],
+                    "name": match[1]
+                }
+            }), 200
+        else:
+            return jsonify({"match_found": False, "message": "No matching person found"}), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/image/<int:image_id>", methods=["GET"])
-def get_image(image_id):
-    try:
-        cursor.execute("SELECT image FROM missing_persons WHERE id = %s", (image_id,))
-        row = cursor.fetchone()
-        if not row:
-            return jsonify({"error": "Image not found"}), 404
-
-        image_data = row[0]
-        return send_file(io.BytesIO(image_data), mimetype="image/jpeg")
-    
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)
