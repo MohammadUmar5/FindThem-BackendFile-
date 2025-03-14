@@ -7,7 +7,7 @@
 
 ## Step 1: Clone the Repository
 ```sh
-git clone <repository-url>
+git clone https://github.com/MohammadUmar5/FindThem-BackendFile-.git
 cd AI_Face_detection
 ```
 
